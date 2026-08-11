@@ -13,7 +13,10 @@ source .venv/bin/activate
 # 2. 의존성 설치
 pip install -r requirements.txt
 
-# 3. 서버 실행 (everytime.db 파일이 자동 생성됨)
+# 3. 테스트 데이터 생성 (게시판 3개 + 테스트 유저 + 샘플 게시글, 여러 번 실행해도 안전)
+python seed.py
+
+# 4. 서버 실행 (everytime.db 파일이 자동 생성됨)
 uvicorn main:app --reload
 ```
 
@@ -22,12 +25,16 @@ uvicorn main:app --reload
 
 ## 역할 분담
 
-| 담당 | 기능 | 파일 |
-|------|------|------|
-| 나희 | 로그인/회원가입, 댓글, 좋아요/싫어요 | `routers/auth.py`, `routers/comments.py`, `routers/reactions.py` + `schemas/auth.py`, `schemas/comment.py`, `schemas/reaction.py` + `auth_utils.py` |
-| 서현 | 게시판 (목록/게시판별 글 리스트) | `routers/boards.py` + `schemas/board.py` |
-| 하은 | 게시글 CRUD | `routers/posts.py` + `schemas/post.py` |
-| 준모 | 검색 + 태그 필터링 | `routers/search.py` + `schemas/search.py` |
+| 담당 | 기능 | 파일 | 상태 |
+|------|------|------|------|
+| 나희 | 로그인/회원가입, 댓글, 좋아요/싫어요 | `routers/auth.py`, `routers/comments.py`, `routers/reactions.py` + `schemas/auth.py`, `schemas/comment.py`, `schemas/reaction.py` + `auth_utils.py` | ✅ 완료 |
+| 서현 | 게시판 (목록/게시판별 글 리스트) | `routers/boards.py` + `schemas/board.py` | TODO |
+| 하은 | 게시글 CRUD | `routers/posts.py` + `schemas/post.py` | TODO |
+| 준모 | 검색 + 태그 필터링 | `routers/search.py` + `schemas/search.py` | TODO |
+
+인증이 필요한 API를 만들 때는 `auth_utils.py`의 `get_current_user`를 쓰면 되고,
+비로그인도 접근 가능하지만 로그인 시 "내 상태"(is_mine 등)를 함께 주고 싶으면 `get_current_user_optional`을 쓰면 됩니다.
+사용 예시는 `routers/comments.py` 참고.
 
 ## 폴더 구조
 
