@@ -26,6 +26,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24시간
 
 bearer_scheme = HTTPBearer()
+bearer_scheme_optional = HTTPBearer(auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -62,3 +63,18 @@ def get_current_user(
     if user is None:
         raise unauthorized
     return user
+
+
+def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme_optional),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """토큰이 없거나 유효하지 않으면 None. 비로그인도 볼 수 있는 목록/상세 조회에서
+    is_mine, my_reaction 같은 "내 상태" 표시용으로 사용한다."""
+    if credentials is None:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.PyJWTError:
+        return None
+    return db.get(User, int(payload["sub"]))
