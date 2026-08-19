@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,21 @@ SECRET_KEY = "everytime-plus-secret-key-change-in-production"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24시간
 
-bearer_scheme = HTTPBearer()
+class KoreanHTTPBearer(HTTPBearer):
+    """Authorization 헤더가 없을 때 FastAPI 기본 영문 메시지("Not authenticated")
+    대신 다른 에러와 같은 한국어 문구를 내려준다."""
+
+    async def __call__(self, request: Request) -> HTTPAuthorizationCredentials:
+        try:
+            return await super().__call__(request)
+        except HTTPException:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="로그인이 필요합니다",
+            )
+
+
+bearer_scheme = KoreanHTTPBearer()
 bearer_scheme_optional = HTTPBearer(auto_error=False)
 
 
