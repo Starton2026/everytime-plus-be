@@ -1,65 +1,41 @@
 # 담당: 하은 - 게시글 CRUD
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-
-from auth_utils import get_current_user
-from database import get_db
-from models import User
-
-router = APIRouter(prefix="/posts", tags=["posts"])
-
-
-@router.post("")
-def create_post(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    # TODO(하은): 게시글 작성 (PostCreate)
-    #  - 제목 1~100자(trim), 본문 1~2000자, 태그 최대 3개
-    #  - 태그는 이름으로 받아서 Tag 테이블에 없으면 생성 후 연결
-    raise NotImplementedError
-
-
-@router.get("/{post_id}")
-def get_post(post_id: int, db: Session = Depends(get_db)):
-    # TODO(하은): 게시글 상세 (PostDetail)
-    #  - like/dislike 카운트는 reactions 관계에서 집계
-    #  - is_anonymous면 author_nickname을 "익명"으로
-    raise NotImplementedError
-
-
-@router.put("/{post_id}")
-def update_post(
-    post_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    # TODO(하은): 게시글 수정 (PostUpdate). 작성자 본인만 (아니면 403)
-    raise NotImplementedError
-
-
-@router.delete("/{post_id}")
-def delete_post(
-    post_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    # TODO(하은): 게시글 삭제. 작성자 본인만 (아니면 403)
-    raise NotImplementedError
-
-
-#---------------------------------------------------------------
-
-# 담당: 하은 - 게시글 CRUD 스키마
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth_utils import get_current_user
+from auth_utils import get_current_user, get_current_user_optional
 from database import get_db
-from models import User, Post, Tag, Board
-from schemas.post import PostCreate, PostUpdate, PostDetail
+from models import Board, Post, Tag, User
+from post_utils import to_post_detail
+from schemas.post import PostCreate, PostDetail, PostUpdate
 
 router = APIRouter(prefix="/posts", tags=["posts"])
+
+
+def get_post_or_404(post_id: int, db: Session) -> Post:
+    post = db.query(Post).filter(Post.id == post_id).first()
+
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="게시글을 찾을 수 없습니다.",
+        )
+
+    return post
+
+
+def attach_tags(post: Post, tag_names: list[str], db: Session) -> None:
+    """태그 이름으로 Tag를 찾고, 없으면 만들어서 게시글에 연결한다."""
+    post.tags.clear()
+
+    for tag_name in tag_names:
+        tag = db.query(Tag).filter(Tag.name == tag_name).first()
+
+        if not tag:
+            tag = Tag(name=tag_name)
+            db.add(tag)
+            db.flush()
+
+        post.tags.append(tag)
 
 
 @router.post("", response_model=PostDetail)
@@ -83,67 +59,28 @@ def create_post(
         content=data.content,
         is_anonymous=data.is_anonymous,
     )
-
-    for tag_name in data.tags:
-        tag = db.query(Tag).filter(Tag.name == tag_name).first()
-
-        if not tag:
-            tag = Tag(name=tag_name)
-            db.add(tag)
-            db.flush()
-
-        new_post.tags.append(tag)
+    attach_tags(new_post, data.tags, db)
 
     db.add(new_post)
     db.commit()
     db.refresh(new_post)
 
-    return {
-        "id": new_post.id,
-        "title": new_post.title,
-        "content": new_post.content,
-        "tags": [tag.name for tag in new_post.tags],
-        "like_count": 0,
-        "dislike_count": 0,
-        "author_nickname": "익명" if new_post.is_anonymous else user.nickname,
-        "is_anonymous": new_post.is_anonymous,
-        "created_at": new_post.created_at,
-    }
+    return to_post_detail(new_post, user)
 
 
 @router.get("/{post_id}", response_model=PostDetail)
 def get_post(
     post_id: int,
     db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
 ):
-    post = db.query(Post).filter(Post.id == post_id).first()
+    """게시글 상세 조회. 로그인 불필요.
 
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="게시글을 찾을 수 없습니다.",
-        )
-
-    like_count = 0
-    dislike_count = 0
-
-    for reaction in post.reactions:
-        if reaction.type == "like":
-            like_count += 1
-        elif reaction.type == "dislike":
-            dislike_count += 1
-
-    return {
-        "id": post.id,
-        "title": post.title,
-        "content": post.content,
-        "tags": [tag.name for tag in post.tags],
-        "like_count": like_count,
-        "dislike_count": dislike_count,
-        "author_nickname": "익명" if post.is_anonymous else post.author.nickname,
-        "is_anonymous": post.is_anonymous,
-        "created_at": post.created_at,
-    }
+    로그인 상태면 is_mine / my_reaction이 함께 내려간다.
+    (프론트에서 수정·삭제 버튼 노출, 좋아요 눌린 상태 유지에 쓴다)
+    """
+    post = get_post_or_404(post_id, db)
+    return to_post_detail(post, user)
 
 
 @router.put("/{post_id}", response_model=PostDetail)
@@ -153,13 +90,7 @@ def update_post(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    post = db.query(Post).filter(Post.id == post_id).first()
-
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="게시글을 찾을 수 없습니다.",
-        )
+    post = get_post_or_404(post_id, db)
 
     if post.author_id != user.id:
         raise HTTPException(
@@ -169,41 +100,12 @@ def update_post(
 
     post.title = data.title
     post.content = data.content
-    post.tags.clear()
-
-    for tag_name in data.tags:
-        tag = db.query(Tag).filter(Tag.name == tag_name).first()
-
-        if not tag:
-            tag = Tag(name=tag_name)
-            db.add(tag)
-            db.flush()
-
-        post.tags.append(tag)
+    attach_tags(post, data.tags, db)
 
     db.commit()
     db.refresh(post)
 
-    like_count = 0
-    dislike_count = 0
-
-    for reaction in post.reactions:
-        if reaction.type == "like":
-            like_count += 1
-        elif reaction.type == "dislike":
-            dislike_count += 1
-
-    return {
-        "id": post.id,
-        "title": post.title,
-        "content": post.content,
-        "tags": [tag.name for tag in post.tags],
-        "like_count": like_count,
-        "dislike_count": dislike_count,
-        "author_nickname": "익명" if post.is_anonymous else post.author.nickname,
-        "is_anonymous": post.is_anonymous,
-        "created_at": post.created_at,
-    }
+    return to_post_detail(post, user)
 
 
 @router.delete("/{post_id}")
@@ -212,13 +114,7 @@ def delete_post(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    post = db.query(Post).filter(Post.id == post_id).first()
-
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="게시글을 찾을 수 없습니다.",
-        )
+    post = get_post_or_404(post_id, db)
 
     if post.author_id != user.id:
         raise HTTPException(
