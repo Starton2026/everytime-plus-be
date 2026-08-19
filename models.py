@@ -1,6 +1,6 @@
 # 공통 파일 - 프로젝트 시작 시 다같이 확정한 테이블 정의.
 # 이후 변경이 필요하면 반드시 팀 합의 후 수정할 것 (전원 코드에 영향)
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -16,6 +16,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+
+
+def utcnow() -> datetime:
+    """생성 시각 기본값. 타임존 없는 UTC로 통일해서 저장한다.
+
+    datetime.utcnow()는 Python 3.12에서 deprecated 되어 같은 값을 주는 방식으로 바꿨다.
+    응답으로 나갈 때 UTC임을 표시하는 건 schemas/common.py의 UtcDateTime이 맡는다.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 # 게시글 <-> 태그 다대다 연결 테이블 (게시글당 태그 최대 3개는 API에서 검증)
 post_tags = Table(
@@ -65,7 +74,7 @@ class Post(Base):
     title = Column(String(100), nullable=False)  # 1~100자
     content = Column(Text, nullable=False)  # 1~2000자
     is_anonymous = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
 
     board = relationship("Board", back_populates="posts")
     author = relationship("User", back_populates="posts")
@@ -82,7 +91,7 @@ class Comment(Base):
     author_id = Column(ForeignKey("users.id"), nullable=False)
     content = Column(String(300), nullable=False)  # 1~300자
     is_anonymous = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
 
     post = relationship("Post", back_populates="comments")
     author = relationship("User", back_populates="comments")
