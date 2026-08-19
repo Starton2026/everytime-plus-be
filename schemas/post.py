@@ -52,9 +52,10 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class PostCreate(BaseModel):
-    title: str  # 1~100자, 공백만 입력 불가, 앞뒤 공백 자동 제거
-    content: str  # 1~2000자, 공백만 입력 불가, 앞뒤 공백 자동 제거
-    tags: list[str] = Field(default_factory=list)  # 최대 3개
+    board_id: int
+    title: str
+    content: str
+    tags: list[str] = Field(default_factory=list)
     is_anonymous: bool = False
 
     @field_validator("title")
@@ -165,15 +166,13 @@ class PostUpdate(BaseModel):
 
 
 class PostListItem(BaseModel):
-    """게시글 리스트용: 본문은 일부만"""
-
     id: int
     title: str
     content_preview: str
     tags: list[str]
     like_count: int
     dislike_count: int
-    author_nickname: str  # is_anonymous=True면 "익명"
+    author_nickname: str
     created_at: datetime
 
 
