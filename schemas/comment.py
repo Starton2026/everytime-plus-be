@@ -1,8 +1,9 @@
 # 담당: 나희 - 댓글 스키마
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
+
+from schemas.common import UtcDateTime
 
 
 class CommentCreate(BaseModel):
@@ -24,6 +25,6 @@ class CommentResponse(BaseModel):
     author_nickname: str  # is_anonymous=True면 "익명"
     like_count: int
     dislike_count: int
-    created_at: datetime
+    created_at: UtcDateTime
     is_mine: bool  # 프론트에서 삭제 버튼 표시용
     my_reaction: Literal["like", "dislike"] | None  # 내가 누른 좋아요/싫어요 상태
