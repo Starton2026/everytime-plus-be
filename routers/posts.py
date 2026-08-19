@@ -51,145 +51,182 @@ def delete_post(
 #---------------------------------------------------------------
 
 # 담당: 하은 - 게시글 CRUD 스키마
-from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
-from pydantic import BaseModel, Field, field_validator
+from auth_utils import get_current_user
+from database import get_db
+from models import User, Post, Tag, Board
+from schemas.post import PostCreate, PostUpdate, PostDetail
 
-
-class PostCreate(BaseModel):
-    board_id: int
-    title: str
-    content: str
-    tags: list[str] = Field(default_factory=list)
-    is_anonymous: bool = False
-
-    @field_validator("title")
-    @classmethod
-    def validate_title(cls, value: str) -> str:
-        value = value.strip()
-
-        if not value:
-            raise ValueError("제목을 입력해주세요.")
-
-        if len(value) > 100:
-            raise ValueError("제목은 100자 이하로 입력해주세요.")
-
-        return value
-
-    @field_validator("content")
-    @classmethod
-    def validate_content(cls, value: str) -> str:
-        value = value.strip()
-
-        if not value:
-            raise ValueError("내용을 입력해주세요.")
-
-        if len(value) > 2000:
-            raise ValueError("내용은 2000자 이하로 입력해주세요.")
-
-        return value
-
-    @field_validator("tags")
-    @classmethod
-    def validate_tags(cls, value: list[str]) -> list[str]:
-        if len(value) > 3:
-            raise ValueError("태그는 최대 3개까지 입력할 수 있습니다.")
-
-        cleaned_tags = []
-
-        for tag in value:
-            tag = tag.strip()
-
-            if not tag:
-                raise ValueError("빈 태그는 입력할 수 없습니다.")
-
-            if len(tag) > 20:
-                raise ValueError("태그는 20자 이하로 입력해주세요.")
-
-            cleaned_tags.append(tag)
-
-        if len(cleaned_tags) != len(set(cleaned_tags)):
-            raise ValueError("같은 태그를 중복해서 입력할 수 없습니다.")
-
-        return cleaned_tags
+router = APIRouter(prefix="/posts", tags=["posts"])
 
 
-class PostUpdate(BaseModel):
-    title: str
-    content: str
-    tags: list[str] = Field(default_factory=list)
+@router.post("", response_model=PostDetail)
+def create_post(
+    data: PostCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    board = db.query(Board).filter(Board.id == data.board_id).first()
 
-    @field_validator("title")
-    @classmethod
-    def validate_title(cls, value: str) -> str:
-        value = value.strip()
+    if not board:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="게시판을 찾을 수 없습니다.",
+        )
 
-        if not value:
-            raise ValueError("제목을 입력해주세요.")
+    new_post = Post(
+        board_id=data.board_id,
+        author_id=user.id,
+        title=data.title,
+        content=data.content,
+        is_anonymous=data.is_anonymous,
+    )
 
-        if len(value) > 100:
-            raise ValueError("제목은 100자 이하로 입력해주세요.")
+    for tag_name in data.tags:
+        tag = db.query(Tag).filter(Tag.name == tag_name).first()
 
-        return value
+        if not tag:
+            tag = Tag(name=tag_name)
+            db.add(tag)
+            db.flush()
 
-    @field_validator("content")
-    @classmethod
-    def validate_content(cls, value: str) -> str:
-        value = value.strip()
+        new_post.tags.append(tag)
 
-        if not value:
-            raise ValueError("내용을 입력해주세요.")
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
 
-        if len(value) > 2000:
-            raise ValueError("내용은 2000자 이하로 입력해주세요.")
-
-        return value
-
-    @field_validator("tags")
-    @classmethod
-    def validate_tags(cls, value: list[str]) -> list[str]:
-        if len(value) > 3:
-            raise ValueError("태그는 최대 3개까지 입력할 수 있습니다.")
-
-        cleaned_tags = []
-
-        for tag in value:
-            tag = tag.strip()
-
-            if not tag:
-                raise ValueError("빈 태그는 입력할 수 없습니다.")
-
-            if len(tag) > 20:
-                raise ValueError("태그는 20자 이하로 입력해주세요.")
-
-            cleaned_tags.append(tag)
-
-        if len(cleaned_tags) != len(set(cleaned_tags)):
-            raise ValueError("같은 태그를 중복해서 입력할 수 없습니다.")
-
-        return cleaned_tags
+    return {
+        "id": new_post.id,
+        "title": new_post.title,
+        "content": new_post.content,
+        "tags": [tag.name for tag in new_post.tags],
+        "like_count": 0,
+        "dislike_count": 0,
+        "author_nickname": "익명" if new_post.is_anonymous else user.nickname,
+        "is_anonymous": new_post.is_anonymous,
+        "created_at": new_post.created_at,
+    }
 
 
-class PostListItem(BaseModel):
-    """게시글 리스트용: 본문은 일부만"""
+@router.get("/{post_id}", response_model=PostDetail)
+def get_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+):
+    post = db.query(Post).filter(Post.id == post_id).first()
 
-    id: int
-    title: str
-    content_preview: str
-    tags: list[str]
-    like_count: int
-    dislike_count: int
-    author_nickname: str
-    created_at: datetime
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="게시글을 찾을 수 없습니다.",
+        )
+
+    like_count = 0
+    dislike_count = 0
+
+    for reaction in post.reactions:
+        if reaction.type == "like":
+            like_count += 1
+        elif reaction.type == "dislike":
+            dislike_count += 1
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content": post.content,
+        "tags": [tag.name for tag in post.tags],
+        "like_count": like_count,
+        "dislike_count": dislike_count,
+        "author_nickname": "익명" if post.is_anonymous else post.author.nickname,
+        "is_anonymous": post.is_anonymous,
+        "created_at": post.created_at,
+    }
 
 
-class PostDetail(BaseModel):
-    id: int
-    title: str
-    content: str
-    tags: list[str]
-    like_count: int
-    dislike_count: int
-    author_nickname: str
-    is_anonymous: bool
-    created_at: datetime
+@router.put("/{post_id}", response_model=PostDetail)
+def update_post(
+    post_id: int,
+    data: PostUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    post = db.query(Post).filter(Post.id == post_id).first()
+
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="게시글을 찾을 수 없습니다.",
+        )
+
+    if post.author_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="게시글을 수정할 권한이 없습니다.",
+        )
+
+    post.title = data.title
+    post.content = data.content
+    post.tags.clear()
+
+    for tag_name in data.tags:
+        tag = db.query(Tag).filter(Tag.name == tag_name).first()
+
+        if not tag:
+            tag = Tag(name=tag_name)
+            db.add(tag)
+            db.flush()
+
+        post.tags.append(tag)
+
+    db.commit()
+    db.refresh(post)
+
+    like_count = 0
+    dislike_count = 0
+
+    for reaction in post.reactions:
+        if reaction.type == "like":
+            like_count += 1
+        elif reaction.type == "dislike":
+            dislike_count += 1
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content": post.content,
+        "tags": [tag.name for tag in post.tags],
+        "like_count": like_count,
+        "dislike_count": dislike_count,
+        "author_nickname": "익명" if post.is_anonymous else post.author.nickname,
+        "is_anonymous": post.is_anonymous,
+        "created_at": post.created_at,
+    }
+
+
+@router.delete("/{post_id}")
+def delete_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    post = db.query(Post).filter(Post.id == post_id).first()
+
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="게시글을 찾을 수 없습니다.",
+        )
+
+    if post.author_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="게시글을 삭제할 권한이 없습니다.",
+        )
+
+    db.delete(post)
+    db.commit()
+
+    return {"message": "게시글이 삭제되었습니다."}
